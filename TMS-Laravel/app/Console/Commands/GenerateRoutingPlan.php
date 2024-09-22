@@ -208,19 +208,25 @@ class GenerateRoutingPlan extends Command
             return $a['distance'] <=> $b['distance'];
         });
 
-        $storeIndex = 0;
         $totalStores = count($stores);
 
-        // Step 2: Assign stores based on frequency and available dates
-        foreach ($dates as $date) {
-            foreach ($salesReps as $rep => &$repVisits) {
-                if (count($repVisits[$date] ?? []) < 30 && $storeIndex < $totalStores) {
-                    // Assign stores to the sales rep for the given date
-                    $repVisits[$date][] = $stores[$storeIndex]['Name'];
-                    $storeIndex++;
-                    // Reset the store index if all stores have been assigned
-                    if ($storeIndex >= $totalStores) {
-                        $storeIndex = 0;
+        // Step 2: Assign stores to sales reps based on frequency
+        foreach ($stores as $store) {
+            $assignedCount = 0;
+            $storeIndex = 0;
+
+            // Loop through dates to schedule based on frequency
+            foreach ($dates as $dateIndex => $date) {
+                if ($assignedCount >= $frequency) {
+                    break; // Store has been assigned for the required number of visits
+                }
+
+                foreach ($salesReps as $rep => &$repVisits) {
+                    // Check if the store can be assigned to this sales rep on the given date
+                    if (count($repVisits[$date] ?? []) < 30 && !in_array($store['Name'], $repVisits[$date] ?? [])) {
+                        $repVisits[$date][] = $store['Name'];
+                        $assignedCount++;
+                        break; // Move to the next date for this store
                     }
                 }
             }
