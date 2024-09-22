@@ -34,10 +34,11 @@ services:
       - ./env/mongo.express.env
   composer:
     build:
-      context: ./dockerfiles
-      dockerfile: composer.dockerfile
+      context: .
+      dockerfile: dockerfiles/composer.dockerfile
     volumes:
       - ./TMS-Laravel:/var/www/html
+    working_dir: /var/www/html
   artisan:
     build:
       context: .
