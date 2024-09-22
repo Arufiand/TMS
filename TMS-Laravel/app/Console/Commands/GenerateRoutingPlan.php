@@ -2,39 +2,32 @@
 
 namespace App\Console\Commands;
 
+use Carbon\Carbon;
 use Illuminate\Console\Command;
 use League\Csv\Exception;
 use League\Csv\Reader;
-use Carbon\Carbon;
 use League\Csv\UnavailableStream;
-
+use Maatwebsite\Excel\Facades\Excel;
+use App\Exports\RoutingPlanExport;
 
 class GenerateRoutingPlan extends Command
 {
-    /**
-     * The name and signature of the console command.
-     *
-     * @var string
-     */
-    protected $signature = 'app:generate-routing-plan';
+    protected $signature = 'generate:routing-plan';
+    protected $description = 'Generate the most effective routing plan based on proximity and store visit frequency';
+
+    // HQ coordinates
+    private float $hqLatitude = -7.9826;
+    private float $hqLongitude = 112.6308;
 
     /**
-     * The console command description.
-     *
-     * @var string
-     */
-    protected $description = 'Command description';
-
-    /**
-     * Execute the console command.
      * @throws UnavailableStream
      * @throws Exception
      */
     public function handle(): void
     {
-        // Step 1: Load the stores from the CSV file
+        // Step 1: Load the stores from CSV
         $csv = Reader::createFromPath(storage_path('app/stores.csv'), 'r');
-        $csv->setHeaderOffset(0); // First row is the header
+        $csv->setHeaderOffset(0); // Assumes first row is header
         $stores = iterator_to_array($csv->getRecords());
 
         // Step 2: Organize stores by frequency (weekly, biweekly, monthly)
@@ -42,7 +35,7 @@ class GenerateRoutingPlan extends Command
         $biweeklyStores = [];
         $monthlyStores = [];
         foreach ($stores as $store) {
-            switch (strtolower($store['FINAL CYCLE'])) {
+            switch ($store['FINAL CYCLE']) {
                 case 'weekly':
                     $weeklyStores[] = $store;
                     break;
@@ -55,75 +48,78 @@ class GenerateRoutingPlan extends Command
             }
         }
 
-        // Step 3: Prepare sales reps
+        // Step 3: Group stores by distance using Haversine calculation
+        $hqCoordinates = ['lat' => -7.9826, 'lng' => 112.6308]; // HQ Coordinates
+
+        $stores = array_map(function($store) use ($hqCoordinates) {
+            $store['distance'] = $this->haversineDistance($hqCoordinates['lat'], $hqCoordinates['lng'], $store['Latitude'], $store['Longitude']);
+            return $store;
+        }, $stores);
+
+        // Sort the stores by distance from HQ (nearest first)
+        usort($stores, function($a, $b) {
+            return $a['distance'] <=> $b['distance'];
+        });
+
+        // Step 4: Assign stores to sales reps, distribute evenly
         $salesReps = [];
-        for ($i = 1; $i <= 10; $i++) {
+        $totalSalesReps = 10; // Number of sales reps
+        for ($i = 1; $i <= $totalSalesReps; $i++) {
             $salesReps['Sales' . $i] = [];
         }
 
-        // Step 4: Schedule visits (weekly: 4 visits, biweekly: 2 visits, monthly: 1 visit)
-        $this->scheduleVisits($salesReps, $weeklyStores, 4);
-        $this->scheduleVisits($salesReps, $biweeklyStores, 2);
-        $this->scheduleVisits($salesReps, $monthlyStores, 1);
+        // Step 5: Schedule visits with equal distribution
+        $daysInMonth = 31;
+        $storesPerDay = 30;
+        $currentDay = 1;
 
-        // Step 5: Output the routing plan
-        $this->outputRoutingPlan($salesReps);
-    }
-
-    /**
-     * Schedule store visits for the given frequency
-     */
-    private function scheduleVisits(&$salesReps, $stores, $visitTimes): void
-    {
-        $startDate = Carbon::create(2024, 10, 1); // Starting date (October 1st, 2024)
-        $day = 0;
-        $salesIndex = 0;
+        // Initialize sales rep round-robin counter
+        $currentRep = 1;
 
         foreach ($stores as $store) {
-            for ($i = 0; $i < $visitTimes; $i++) {
-                $currentDay = $startDate->copy()->addDays($day);
+            $salesRep = 'Sales' . $currentRep;
 
-                // Ensure Sundays are skipped (day 0 is Sunday)
-                if ($currentDay->isSunday()) {
-                    $day++;
-                    $currentDay = $startDate->copy()->addDays($day);
+            // If the current sales rep has visited 30 stores in the current day, move to the next day
+            if (count($salesReps[$salesRep][$currentDay] ?? []) >= $storesPerDay) {
+                $currentDay++;
+                if ($currentDay > $daysInMonth) {
+                    $currentDay = 1; // Reset to the first day of the month if we go over 31 days
                 }
+            }
 
-                // Assign stores to sales reps ensuring no more than 30 stores per day
-                $currentSalesRep = 'Sales' . ($salesIndex % 10 + 1);
+            // Assign the store to the current sales rep for the current day
+            $salesReps[$salesRep][$currentDay][] = $store['Name'];
 
-                if (!isset($salesReps[$currentSalesRep][$currentDay->format('Y-m-d')])) {
-                    $salesReps[$currentSalesRep][$currentDay->format('Y-m-d')] = [];
-                }
-
-                if (count($salesReps[$currentSalesRep][$currentDay->format('Y-m-d')]) < 30) {
-                    $salesReps[$currentSalesRep][$currentDay->format('Y-m-d')][] = $store;
-                } else {
-                    // Move to the next available day
-                    $day++;
-                    $i--; // Reattempt for this visit
-                }
-
-                $day++; // Increment day for each visit
+            // Move to the next sales rep in round-robin
+            $currentRep++;
+            if ($currentRep > $totalSalesReps) {
+                $currentRep = 1; // Reset to the first sales rep
             }
         }
+
+        // Step 6: Output the routing plan for each sales rep
+        Excel::store(new RoutingPlanExport($salesReps), 'routing_plan.xlsx');
+        $this->info('Routing plan generated and saved to storage.');
     }
 
-    /**
-     * Output the routing plan
-     */
-    private function outputRoutingPlan($salesReps): void
+// Haversine Distance Calculation
+    private function haversineDistance($lat1, $lon1, $lat2, $lon2)
     {
-        foreach ($salesReps as $salesRep => $days) {
-            $this->info($salesRep);
-            foreach ($days as $date => $stores) {
-                $this->info($date);
-                foreach ($stores as $store) {
-                    $this->info(' - ' . $store['Name'] . ' (' . $store['Code'] . ')');
-                }
-                $this->info(''); // Add a blank line after each day's schedule
-            }
-            $this->info('====================');
-        }
+        $earthRadius = 6371; // Earth radius in kilometers
+
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLon = deg2rad($lon2 - $lon1);
+
+        $a = sin($dLat / 2) * sin($dLat / 2) +
+            cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
+            sin($dLon / 2) * sin($dLon / 2);
+
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+        $distance = $earthRadius * $c; // Distance in kilometers
+
+        return $distance;
     }
 }
+
+
