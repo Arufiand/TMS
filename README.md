@@ -22,8 +22,8 @@ This document explains the flow for generating a routing plan for sales represen
 
 ### Clone the Repository
 ```bash
-git clone https://github.com/your-repo/sales-routing-plan.git
-cd sales-routing-plan
+git clone https://github.com/Arufiand/TMS
+cd TMS
 ```
 ### Run with Docker
 1. Ensure that Docker and Docker Compose are installed on your machine.
