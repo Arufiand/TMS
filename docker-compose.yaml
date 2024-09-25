@@ -1,10 +1,8 @@
-version: '3.8'
-
 services:
   server:
     build:
       context: .
-      dockerfile: dockerfiles/nginx.dockerfile
+      dockerfile: Dockerfiles/nginx.dockerfile
     ports:
       - '8000:80'
     volumes:
@@ -15,23 +13,28 @@ services:
   php:
     build:
       context: .
-      dockerfile: dockerfiles/php.dockerfile
+      dockerfile: Dockerfiles/php.dockerfile
     volumes:
       - ./TMS-Laravel:/var/www/html:delegated
+    depends_on:
+      - composer
+
   composer:
     build:
       context: .
-      dockerfile: dockerfiles/composer.dockerfile
+      dockerfile: Dockerfiles/composer.dockerfile
     volumes:
       - ./TMS-Laravel:/var/www/html
     working_dir: /var/www/html
   artisan:
     build:
       context: .
-      dockerfile: dockerfiles/php.dockerfile
+      dockerfile: Dockerfiles/php.dockerfile
     volumes:
       - ./TMS-Laravel:/var/www/html
     entrypoint: ['php', '/var/www/html/artisan']
+    depends_on:
+      - composer
   npm:
     image: node:14
     working_dir: /var/www/html

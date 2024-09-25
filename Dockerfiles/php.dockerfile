@@ -1,8 +1,9 @@
-FROM php:8.4-rc-fpm-alpine
+FROM php:8.3-fpm-alpine
 
 WORKDIR /var/www/html
 
-COPY TMS-Laravel .
+#COPY TMS-Laravel .
+COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
 
 RUN docker-php-ext-install pdo pdo_mysql
 
